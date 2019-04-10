@@ -1,0 +1,121 @@
+ssh-copy-id root@<server_domain_or_IP>
+
+/bin/bash -c "export TZ=Europe/London"
+ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+sudo apt-get update
+sudo apt-get install python3-pip python3-dev libpq-dev postgresql postgresql-contrib nginx vim
+
+sudo -u postgres psql
+CREATE DATABASE switch;
+CREATE USER switchuser WITH PASSWORD 'switchpass';
+ALTER ROLE switchuser CREATEDB;
+ALTER ROLE switchuser SET client_encoding TO 'utf8';
+ALTER ROLE switchuser SET default_transaction_isolation TO 'read committed';
+ALTER ROLE switchuser SET timezone TO 'UTC';
+GRANT ALL PRIVILEGES ON DATABASE switch TO switchuser;
+\q
+
+/* sudo pip3 install --upgrade pip <- breaks pip */
+sudo -H pip3 install virtualenv
+useradd -m switch-user
+passwd switch-user
+su - switch-user
+mkdir switch .virtualenv
+mkdir .virtualenv/dev
+virtualenv -p python3 .virtualenv/dev
+source .virtualenv/dev/bin/activate
+pip install django djangorestframework gunicorn psycopg2
+
+django-admin.py startproject switch ~/switch
+vim switch/switch/settings.py
+...
+ALLOWED_HOSTS = ['your_server_domain_or_IP']
+...
+STATIC_ROOT = os.path.join(BASE_DIR, 'static/')
+...
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql_psycopg2',
+        'NAME': 'switch',
+        'USER': 'switchuser',
+        'PASSWORD': 'switchpass',
+        'HOST': 'localhost',
+        'PORT': '',
+    }
+}
+...
+
+switch/manage.py makemigrations
+switch/manage.py migrate
+switch/manage.py createsuperuser
+switch/manage.py collectstatic
+
+/**
+// testing
+deactivate
+exit
+ufw allow 8000
+su - switch-user
+cd switch
+./manage.py runserver 0.0.0.0:8000
+gunicorn --bind 0.0.0.0:8000 switch.wsgi
+*/
+
+deactivate
+exit
+vim /etc/systemd/system/gunicorn.service
+...
+[Unit]
+Description=gunicorn daemon
+After=network.target
+
+[Service]
+User=switch-user
+Group=www-data
+WorkingDirectory=/home/switch-user/switch
+ExecStart=/home/switch-user/.virtualenv/dev/bin/gunicorn --access-logfile - --workers 3 --bind unix:/home/switch-user/switch/switch.sock switch.wsgi:application
+
+[Install]
+WantedBy=multi-user.target
+...
+systemctl start gunicorn
+systemctl enable gunicorn
+/**
+systemctl status gunicorn <- check gunicorn is working
+ls /home/switch-user/switch/ <- check socket file is there
+*/
+
+vim /etc/nginx/sites-available/switch
+...
+server {
+    listen 80;
+    server_name <server_domain_or_IP>;
+
+    location = /favicon.ico { access_log off; log_not_found off; }
+    location /static/ {
+        root /home/switch-user/switch;
+    }
+
+    location / {
+        include proxy_params;
+        proxy_pass http://unix:/home/switch-user/switch/switch.sock;
+    }
+}
+...
+ln -s /etc/nginx/sites-available/switch /etc/nginx/sites-enabled
+/**
+nginx -t <- test config
+*/
+systemctl restart nginx
+ufw delete allow 8000
+ufw allow 'Nginx Full'
+
+
+
+
+vim /etc/ssh/ssh_config
+...
+AllowUser switch-user
+...
+service ssh reload

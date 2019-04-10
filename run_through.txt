@@ -1,0 +1,99 @@
+source .virtualenv/dev/bin/activate
+cd switch
+./manage.py flush
+./manage.py shell
+
+from django.contrib.auth.models import User
+client1 = User.objects.create_user(username='client1', email='client1@as.com', password='client1')
+client2 = User.objects.create_user(username='client2', email='client2@as.com', password='client2')
+
+from scheduler.models import Feeder, Receiver
+feeder1 = Feeder.objects.create(name='Feeder 1')
+Feeder.objects.create(name='Feeder 2')
+Feeder.objects.create(name='Feeder 3')
+Feeder.objects.create(name='Feeder 4')
+receiver1 = Receiver.objects.create(name='client1 receiver1', client=client1)
+Receiver.objects.create(name='client1 receiver2', client=client1)
+Receiver.objects.create(name='client1 receiver3', client=client1)
+receiver2 = Receiver.objects.create(name='client2 receiver1', client=client2)
+
+from datetime import timezone, datetime
+import pytz
+from switch import settings
+timezone = pytz.timezone(settings.TIME_ZONE)
+
+from scheduler.models import ScheduledItem
+ScheduledItem.objects.create(
+	feeder=feeder1,
+	receiver=receiver1,
+	start=timezone.localize(datetime(1970, 1, 1, 0, 0, 0)),
+	end=timezone.localize(datetime(1970, 1, 1, 0, 30, 0)))
+ScheduledItem.objects.create(
+	feeder=feeder1,
+	receiver=receiver1,
+	start=timezone.localize(datetime(1970, 1, 1, 1, 0, 0)),
+	end=timezone.localize(datetime(1970, 1, 1, 1, 30, 0)))
+ScheduledItem.objects.create(
+	feeder=feeder1,
+	receiver=receiver2,
+	start=timezone.localize(datetime(1970, 1, 1, 0, 0, 0)),
+	end=timezone.localize(datetime(1970, 1, 1, 0, 30, 0)))
+
+
+from django.test import Client
+client = Client()
+
+response = client.get('/api/dave/', content_type='application/json')
+response.json()
+
+response = client.post('/api/login/', {'username': 'something', 'password': 'something'}, content_type='application/json')
+response.json()
+
+response = client.get('/api/feeders/', content_type='application/json')
+response.json()
+
+response = client.post('/api/login/', {'username': 'client1', 'password': 'client1'}, content_type='application/json')
+response.json()
+
+response = client.get('/api/feeders/', content_type='application/json')
+response.json()
+
+response = client.get('/api/logout/', content_type='application/json')
+response.json()
+
+response = client.get('/api/feeders/', content_type='application/json')
+response.json()
+
+response = client.post('/api/login/', {'username': 'client1', 'password': 'client1'}, content_type='application/json')
+response.json()
+
+response = client.get('/api/receivers/', content_type='application/json')
+response.json()
+
+response = client.get('/api/logout/', content_type='application/json')
+response = client.post('/api/login/', {'username': 'client2', 'password': 'client2'}, content_type='application/json')
+response = client.get('/api/receivers/', content_type='application/json')
+response.json()
+response = client.get('/api/logout/', content_type='application/json')
+response = client.post('/api/login/', {'username': 'client1', 'password': 'client1'}, content_type='application/json')
+
+response = client.get('/api/scheduleditems/'+str(receiver2.id)+'/', content_type='application/json')
+response.json()
+
+response = client.get('/api/scheduleditems/'+str(receiver1.id)+'/', content_type='application/json')
+response.json()
+len(response.json()['data'])
+
+data = {'start': '1970/01/01 00:15:00', 'end': '1970/01/01 00:45:00'}
+response = client.post('/api/scheduleditem/add/'+str(feeder1.id)+'/'+str(receiver1.id)+'/', data, content_type='application/json')
+response.json()
+
+data = {'start': '1970/01/01 03:00:00', 'end': '1970/01/01 04:00:00'}
+response = client.post('/api/scheduleditem/add/'+str(feeder1.id)+'/'+str(receiver1.id)+'/', data, content_type='application/json')
+response.json()
+
+response = client.get('/api/scheduleditems/'+str(receiver1.id)+'/', content_type='application/json')
+response.json()
+len(response.json()['data'])
+
+
